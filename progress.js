@@ -4,7 +4,7 @@ const { LOG_CHANNEL_ID } = require('./config');
 const XP_RANKS = [
   { name: 'Junior Moderator', xp: 0 },
   { name: 'Moderator', xp: 50 },
-  { name: 'Senior Moderator', xp: 150 },
+  { name: 'Senior Moderator', xp: 190 },
   // Add more ranks here
 ];
 
