@@ -44,7 +44,7 @@ const registerCommands = client => {
       const embed = new EmbedBuilder()
         .setTitle(`${nickname} XP Progress`)
         .addFields(
-          { name: 'Current Rank', value: `${nextRank.name}`, inline: true },
+          { name: 'Progression', value: `${nextRank.name}`, inline: true },
           { name: 'Total XP', value: `${xp}`, inline: true },
           { name: 'Rank Progress', value: `${bar} ${(progress * 100).toFixed(0)}%\n${nextRank.xp - xp} XP needed` }
         )
