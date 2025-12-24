@@ -2,7 +2,7 @@ const { google } = require("googleapis");
 const { SHEET_ID } = require("./config");
 
 // Change this if your Render env var name is different:
-const ENV_NAME = "GOOGLE_JSON_B64";
+const ENV_NAME = "GOOGLE_CREDS_B64";
 
 if (!process.env[ENV_NAME]) {
   throw new Error(`Missing ${ENV_NAME} environment variable`);
