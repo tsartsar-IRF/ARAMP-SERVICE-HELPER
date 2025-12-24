@@ -1,47 +1,53 @@
 const { google } = require('googleapis');
-const { SHEET_ID, GOOGLE_JSON_B64 } = require('./config');
-
-const credentials = JSON.parse(Buffer.from(GOOGLE_JSON_B64, 'base64').toString('utf8'));
+const { SHEET_ID } = require('./config');
 
 const auth = new google.auth.GoogleAuth({
-  credentials,
+  credentials: JSON.parse(
+    Buffer.from(process.env.GOOGLE_CREDS_BASE64, 'base64').toString()
+  ),
   scopes: ['https://www.googleapis.com/auth/spreadsheets']
 });
 
 const sheets = google.sheets({ version: 'v4', auth });
+const XP_SHEET = 'XP';
 
-async function getXP(nickname) {
-  const res = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: 'XP!A:B' });
+async function getUserRow(nickname) {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: `${XP_SHEET}!A2:C`
+  });
+
   const rows = res.data.values || [];
-  const row = rows.find(r => r[0] === nickname);
-  return row ? parseInt(row[1]) : 0;
+  const index = rows.findIndex(r => r[0] === nickname);
+  if (index === -1) return null;
+
+  return { row: index + 2, data: rows[index] };
 }
 
-async function updateXP(nickname, amount) {
-  const res = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: 'XP!A:B' });
-  const rows = res.data.values || [];
-  const rowIndex = rows.findIndex(r => r[0] === nickname);
-  if (rowIndex >= 0) {
-    rows[rowIndex][1] = parseInt(rows[rowIndex][1]) + amount;
-  } else {
-    rows.push([nickname, amount]);
-  }
+async function getUserData(nickname) {
+  const user = await getUserRow(nickname);
+  if (!user) return null;
+
+  return {
+    xp: Number(user.data[1]) || 0,
+    rank: user.data[2]
+  };
+}
+
+async function addXP(nickname, amount) {
+  const user = await getUserRow(nickname);
+  if (!user) return null;
+
+  const newXP = Number(user.data[1] || 0) + amount;
+
   await sheets.spreadsheets.values.update({
     spreadsheetId: SHEET_ID,
-    range: 'XP!A:B',
-    valueInputOption: 'RAW',
-    resource: { values: rows }
+    range: `${XP_SHEET}!B${user.row}`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [[newXP]] }
   });
+
+  return true;
 }
 
-async function appendLog(sheetName, rowArray) {
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID,
-    range: `${sheetName}!A:Z`,
-    valueInputOption: 'RAW',
-    resource: { values: [rowArray] }
-  });
-}
-
-module.exports = { getXP, updateXP, appendLog };
-
+module.exports = { getUserData, addXP };
