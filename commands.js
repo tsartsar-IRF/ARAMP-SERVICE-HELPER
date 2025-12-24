@@ -8,9 +8,7 @@ function getDisplayName(member) {
 }
 
 const commandsData = [
-  new SlashCommandBuilder()
-    .setName("xp")
-    .setDescription("Check your XP and progress (from Google Sheets)"),
+  new SlashCommandBuilder().setName("xp").setDescription("Check XP (from Google Sheets)"),
 
   new SlashCommandBuilder()
     .setName("log")
@@ -30,7 +28,7 @@ const commandsData = [
 ];
 
 function registerCommands(client) {
-  // /xp
+  // Attach handlers
   client.commands.set("xp", {
     data: commandsData[0],
     execute: async (interaction) => {
@@ -39,53 +37,50 @@ function registerCommands(client) {
       const row = await getXpRowByNickname(nickname);
       if (!row) {
         return interaction.reply({
-          content:
-            `I couldn't find **${nickname}** in the **XP** tab.\n` +
-            `Make sure XP!A has your nickname exactly.`,
+          content: `No XP row found for **${nickname}** in the **XP** tab (XP!A).`,
           ephemeral: true,
         });
       }
 
-      const { xp, nextXp, rank } = row;
-      const bar = blockBar(xp, nextXp || null);
+      const xp = row.xp;
+      const nextXp = row.nextXp; // can be null if your sheet doesn't have it
+      const rank = row.rank || "Unknown";
 
-      const needed = nextXp ? Math.max(0, nextXp - xp) : 0;
-      const progressLine = nextXp
-        ? `${xp} / ${nextXp}  (**${needed}** left)`
-        : `${xp}  (next rank not set)`;
+      const bar = nextXp ? blockBar(xp, nextXp) : "████████████████████";
+      const needed = nextXp ? Math.max(0, nextXp - xp) : null;
 
       const embed = new EmbedBuilder()
         .setTitle(`${nickname}`)
         .addFields(
-          { name: "Rank", value: rank || "Unknown", inline: true },
+          { name: "Rank", value: rank, inline: true },
           { name: "XP", value: String(xp), inline: true },
-          { name: "Progress", value: `${bar}\n${progressLine}` }
+          {
+            name: "Progress",
+            value: nextXp ? `${bar}\n${xp}/${nextXp} (${needed} left)` : `${bar}\nNextXP not set in sheet`,
+          }
         )
         .setColor(0x2f3136);
 
-      await interaction.reply({ embeds: [embed] });
+      return interaction.reply({ embeds: [embed] });
     },
   });
 
-  // /log -> append to LOG tab (NO XP ADDING)
   client.commands.set("log", {
     data: commandsData[1],
     execute: async (interaction) => {
       const nickname = getDisplayName(interaction.member);
       const type = interaction.options.getString("type");
-      const attendeesRaw = interaction.options.getString("attendees"); // keep comma-separated
+      const attendeesRaw = interaction.options.getString("attendees"); // keep commas
       const proof = interaction.options.getString("proof");
       const timestamp = new Date().toISOString();
 
-      // Columns are up to you; this is a solid default:
-      // Time | Nickname | Type | Attendees | Proof
+      // Writes ONLY to sheet (NO XP adding)
       await appendRow("LOG", [timestamp, nickname, type, attendeesRaw, proof]);
 
-      await interaction.reply({ content: "✅ Logged to Google Sheets.", ephemeral: true });
+      return interaction.reply({ content: "✅ Logged to Google Sheets (LOG).", ephemeral: true });
     },
   });
 
-  // /logselfpatrol -> append to SELF_PATROL tab (NO XP ADDING)
   client.commands.set("logselfpatrol", {
     data: commandsData[2],
     execute: async (interaction) => {
@@ -95,14 +90,14 @@ function registerCommands(client) {
       const proof = interaction.options.getString("proof");
       const timestamp = new Date().toISOString();
 
-      // Time | Nickname | Start | End | Proof
+      // Writes ONLY to sheet (NO XP adding)
       await appendRow("SELF_PATROL", [timestamp, nickname, start, end, proof]);
 
-      await interaction.reply({ content: "✅ Self patrol logged to Google Sheets.", ephemeral: true });
+      return interaction.reply({ content: "✅ Logged to Google Sheets (SELF_PATROL).", ephemeral: true });
     },
   });
 
-  // Register slash commands to your guild
+  // Register slash commands to guild
   const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
   (async () => {
     try {
