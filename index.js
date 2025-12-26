@@ -12,7 +12,7 @@ client.commands = new Collection();
 registerCommands(client);
 
 client.once("ready", () => {
-  console.log(`Logged in as ${client.user.tag}`);
+  console.log("✅ Discord READY event fired");
 });
 
 client.on("interactionCreate", async (interaction) => {
@@ -25,6 +25,4 @@ client.on("interactionCreate", async (interaction) => {
 });
 console.log("🔑 Attempting Discord login...");
 client.login(DISCORD_TOKEN);
-client.once("ready", () => {
-  console.log("✅ Discord READY event fired");
-});
+
