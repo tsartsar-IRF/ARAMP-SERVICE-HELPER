@@ -1,15 +1,17 @@
 const { google } = require("googleapis");
-const { SHEET_ID } = require("./config");
+const { SHEET_ID, GOOGLE_CREDS_BASE64 } = require("./config");
 
-// IMPORTANT: set this to whatever env var name you already use
-const ENV_NAME = "GOOGLE_SERVICE_ACCOUNT";
-
-if (!process.env[ENV_NAME]) {
-  throw new Error(`Missing ${ENV_NAME} environment variable`);
+if (!SHEET_ID) {
+  throw new Error("Missing SHEET_ID environment variable");
 }
 
+if (!GOOGLE_CREDS_BASE64) {
+  throw new Error("Missing GOOGLE_CREDS_BASE64 environment variable");
+}
+
+// Decode base64 service account JSON
 const creds = JSON.parse(
-  Buffer.from(process.env[ENV_NAME], "base64").toString("utf8")
+  Buffer.from(GOOGLE_CREDS_BASE64, "base64").toString("utf8")
 );
 
 const auth = new google.auth.GoogleAuth({
@@ -19,6 +21,7 @@ const auth = new google.auth.GoogleAuth({
 
 const sheets = google.sheets({ version: "v4", auth });
 
+// Append a row to a sheet (LOG, SELF_PATROL, etc.)
 async function appendRow(tabName, valuesArray) {
   return sheets.spreadsheets.values.append({
     spreadsheetId: SHEET_ID,
@@ -28,7 +31,11 @@ async function appendRow(tabName, valuesArray) {
   });
 }
 
-// Expected XP layout: A=Nickname, B=XP, C=NextXP, D=Rank
+// XP tab layout expected:
+// A = Nickname
+// B = XP
+// C = NextXP
+// D = Rank
 async function getXpRowByNickname(nickname) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
@@ -37,14 +44,21 @@ async function getXpRowByNickname(nickname) {
   });
 
   const rows = res.data.values || [];
-  const row = rows.find((r) => String(r[0] || "").trim() === String(nickname).trim());
+  const row = rows.find(
+    (r) => String(r[0] || "").trim() === String(nickname).trim()
+  );
+
   if (!row) return null;
 
-  const xp = Number(row[1] ?? 0);
-  const nextXp = row[2] === "" || row[2] == null ? null : Number(row[2]);
-  const rank = String(row[3] ?? "").trim();
-
-  return { nickname: row[0], xp, nextXp, rank };
+  return {
+    nickname: row[0],
+    xp: Number(row[1] ?? 0),
+    nextXp: row[2] == null || row[2] === "" ? null : Number(row[2]),
+    rank: String(row[3] ?? "").trim(),
+  };
 }
 
-module.exports = { appendRow, getXpRowByNickname };
+module.exports = {
+  appendRow,
+  getXpRowByNickname,
+};
