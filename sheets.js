@@ -1,10 +1,16 @@
 const { google } = require("googleapis");
-const { SHEET_ID, GOOGLE_CREDS_BASE64 } = require("./config");
+const { SHEET_ID } = require("./config");
 
-if (!SHEET_ID) throw new Error("Missing SHEET_ID env var");
-if (!GOOGLE_CREDS_BASE64) throw new Error("Missing GOOGLE_CREDS_BASE64 env var");
+// IMPORTANT: set this to whatever env var name you already use
+const ENV_NAME = "GOOGLE_SERVICE_ACCOUNT";
 
-const creds = JSON.parse(Buffer.from(GOOGLE_CREDS_BASE64, "base64").toString("utf8"));
+if (!process.env[ENV_NAME]) {
+  throw new Error(`Missing ${ENV_NAME} environment variable`);
+}
+
+const creds = JSON.parse(
+  Buffer.from(process.env[ENV_NAME], "base64").toString("utf8")
+);
 
 const auth = new google.auth.GoogleAuth({
   credentials: creds,
@@ -13,47 +19,22 @@ const auth = new google.auth.GoogleAuth({
 
 const sheets = google.sheets({ version: "v4", auth });
 
-// Simple timeout wrapper so Sheets can't hang forever
-async function withTimeout(promise, ms, label = "request") {
-  let t;
-  const timeout = new Promise((_, rej) => {
-    t = setTimeout(() => rej(new Error(`${label} timed out after ${ms}ms`)), ms);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(t);
-  }
-}
-
 async function appendRow(tabName, valuesArray) {
-  return withTimeout(
-    sheets.spreadsheets.values.append({
-      spreadsheetId: SHEET_ID,
-      range: `${tabName}!A:Z`,
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values: [valuesArray] },
-    }),
-    10000,
-    "appendRow"
-  );
+  return sheets.spreadsheets.values.append({
+    spreadsheetId: SHEET_ID,
+    range: `${tabName}!A:Z`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: [valuesArray] },
+  });
 }
 
-// EXPECTED XP TAB:
-// XP!A = Nickname
-// XP!B = XP
-// XP!C = NextXP
-// XP!D = Rank
+// Expected XP layout: A=Nickname, B=XP, C=NextXP, D=Rank
 async function getXpRowByNickname(nickname) {
-  const res = await withTimeout(
-    sheets.spreadsheets.values.get({
-      spreadsheetId: SHEET_ID,
-      range: "XP!A2:D",
-      valueRenderOption: "UNFORMATTED_VALUE",
-    }),
-    10000,
-    "getXpRowByNickname"
-  );
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: "XP!A2:D",
+    valueRenderOption: "UNFORMATTED_VALUE",
+  });
 
   const rows = res.data.values || [];
   const row = rows.find((r) => String(r[0] || "").trim() === String(nickname).trim());
