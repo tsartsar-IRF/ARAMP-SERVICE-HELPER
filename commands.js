@@ -4,26 +4,31 @@ const { blockBar } = require("./progress");
 const { CLIENT_ID, GUILD_ID, LOG_ROLE_ID } = require("./config");
 
 function getDisplayName(member) {
-  return member?.nickname || member?.user?.username || "Unknown";
+  return member.nickname || member.user.username;
 }
 
 function hasRole(member, roleId) {
-  if (!roleId) return true; // if you forget env var, don't lock yourself out
+  if (!roleId) return true; // don’t lock you out if you forget env var
   return member.roles.cache.has(roleId);
 }
 
-const ALLOWED_TYPES = [
-  "Combat Training",
-  "Patrol",
-  "Recruitment Session",
-  "Special Event",
-  "Defense Training",
-];
+// Hard timeout so the bot never hangs forever waiting on Sheets/network
+async function withTimeout(promise, ms, label = "Operation") {
+  let t;
+  const timeout = new Promise((_, reject) => {
+    t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(t);
+  }
+}
 
 const commandsData = [
   new SlashCommandBuilder()
     .setName("xp")
-    .setDescription("Check XP (from Google Sheets formulas)"),
+    .setDescription("Check your XP (from Google Sheets)"),
 
   new SlashCommandBuilder()
     .setName("log")
@@ -59,66 +64,95 @@ function registerCommands(client) {
   client.commands.set("xp", {
     data: commandsData[0],
     execute: async (interaction) => {
+      // ✅ ACK immediately so Discord won’t timeout
       await interaction.deferReply({ ephemeral: true });
 
       const nickname = getDisplayName(interaction.member);
-      const row = await getXpRowByNickname(nickname);
 
-      if (!row) {
+      try {
+        const row = await withTimeout(
+          getXpRowByNickname(nickname),
+          12_000,
+          "Google Sheets XP lookup"
+        );
+
+        if (!row) {
+          return interaction.editReply(
+            `No XP row found for **${nickname}** in the **XP** tab (XP!A).`
+          );
+        }
+
+        const xp = row.xp;
+        const nextXp = row.nextXp;
+        const rank = row.rank || "Unknown";
+
+        const bar = nextXp ? blockBar(xp, nextXp) : "████████████████████";
+        const needed = nextXp ? Math.max(0, nextXp - xp) : null;
+
+        const embed = new EmbedBuilder()
+          .setTitle(`${nickname}`)
+          .addFields(
+            { name: "Rank", value: rank, inline: true },
+            { name: "XP", value: String(xp), inline: true },
+            {
+              name: "Progress",
+              value: nextXp ? `${bar}\n${xp}/${nextXp} (${needed} left)` : `${bar}\nNextXP not set in sheet`,
+            }
+          )
+          .setColor(0x2f3136);
+
+        return interaction.editReply({ embeds: [embed] });
+      } catch (err) {
+        console.error(err);
         return interaction.editReply(
-          `No XP row found for **${nickname}** in the **XP** tab.\nMake sure XP!A contains your nickname exactly.`
+          `⚠️ Sheets request failed. Try again.\n\n**Error:** ${err.message}`
         );
       }
-
-      const { xp, nextXp, rank } = row;
-      const bar = nextXp ? blockBar(xp, nextXp) : "████████████████████";
-      const needed = nextXp ? Math.max(0, nextXp - xp) : null;
-
-      const embed = new EmbedBuilder()
-        .setTitle(`${nickname}`)
-        .addFields(
-          { name: "Rank", value: rank || "Unknown", inline: true },
-          { name: "XP", value: String(xp), inline: true },
-          {
-            name: "Progress",
-            value: nextXp
-              ? `${bar}\n${xp}/${nextXp} (${needed} left)`
-              : `${bar}\nNextXP not set in sheet`,
-          }
-        )
-        .setColor(0x2f3136);
-
-      return interaction.editReply({ embeds: [embed] });
     },
   });
 
-  // /log (restricted role + dropdown only)
+  // /log
   client.commands.set("log", {
     data: commandsData[1],
     execute: async (interaction) => {
-      // Permissions check FIRST (fast)
-      if (!hasRole(interaction.member, LOG_ROLE_ID)) {
-        return interaction.reply({
-          content: "❌ You don’t have permission to use **/log**.",
-          ephemeral: true,
-        });
-      }
-
+      // ✅ ACK immediately
       await interaction.deferReply({ ephemeral: true });
 
+      if (!hasRole(interaction.member, LOG_ROLE_ID)) {
+        return interaction.editReply("❌ You don’t have permission to use **/log**.");
+      }
+
       const nickname = getDisplayName(interaction.member);
-      const type = interaction.options.getString("type");
-      const attendeesRaw = interaction.options.getString("attendees");
+      const type = interaction.options.getString("type"); // dropdown only
+      const attendeesRaw = interaction.options.getString("attendees"); // keep commas
       const proof = interaction.options.getString("proof");
       const timestamp = new Date().toISOString();
 
-      // Extra safety (even though addChoices prevents typing)
-      if (!ALLOWED_TYPES.includes(type)) {
+      // extra safety (even though dropdown already restricts)
+      const ALLOWED = [
+        "Combat Training",
+        "Patrol",
+        "Recruitment Session",
+        "Special Event",
+        "Defense Training",
+      ];
+      if (!ALLOWED.includes(type)) {
         return interaction.editReply("❌ Invalid event type.");
       }
 
-      await appendRow("LOG", [timestamp, nickname, type, attendeesRaw, proof]);
-      return interaction.editReply("✅ Logged to Google Sheets (LOG).");
+      try {
+        await withTimeout(
+          appendRow("LOG", [timestamp, nickname, type, attendeesRaw, proof]),
+          12_000,
+          "Google Sheets LOG append"
+        );
+        return interaction.editReply("✅ Logged to Google Sheets (LOG).");
+      } catch (err) {
+        console.error(err);
+        return interaction.editReply(
+          `⚠️ Logging failed. Try again.\n\n**Error:** ${err.message}`
+        );
+      }
     },
   });
 
@@ -126,6 +160,7 @@ function registerCommands(client) {
   client.commands.set("logselfpatrol", {
     data: commandsData[2],
     execute: async (interaction) => {
+      // ✅ ACK immediately
       await interaction.deferReply({ ephemeral: true });
 
       const nickname = getDisplayName(interaction.member);
@@ -134,12 +169,23 @@ function registerCommands(client) {
       const proof = interaction.options.getString("proof");
       const timestamp = new Date().toISOString();
 
-      await appendRow("SELF_PATROL", [timestamp, nickname, start, end, proof]);
-      return interaction.editReply("✅ Logged to Google Sheets (SELF_PATROL).");
+      try {
+        await withTimeout(
+          appendRow("SELF_PATROL", [timestamp, nickname, start, end, proof]),
+          12_000,
+          "Google Sheets SELF_PATROL append"
+        );
+        return interaction.editReply("✅ Logged to Google Sheets (SELF_PATROL).");
+      } catch (err) {
+        console.error(err);
+        return interaction.editReply(
+          `⚠️ Self patrol logging failed. Try again.\n\n**Error:** ${err.message}`
+        );
+      }
     },
   });
 
-  // Register commands
+  // Register slash commands to guild
   const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
   (async () => {
     try {
@@ -149,7 +195,7 @@ function registerCommands(client) {
       });
       console.log("Commands registered.");
     } catch (err) {
-      console.error("Command registration error:", err);
+      console.error(err);
     }
   })();
 }
