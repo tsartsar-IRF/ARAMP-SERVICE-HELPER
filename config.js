@@ -1,19 +1,12 @@
 module.exports = {
-  DISCORD_TOKEN: process.env.DISCORD_TOKEN,
+  TOKEN: process.env.DISCORD_TOKEN,
   CLIENT_ID: process.env.CLIENT_ID,
   GUILD_ID: process.env.GUILD_ID,
 
-  SHEET_ID: process.env.SHEET_ID,
+  SHEET_ID: process.env.SHEET_ID, // make sure you add this in Render
+  LOG_CHANNEL_ID: process.env.LOG_CHANNEL_ID || null,
 
-  // Role restriction for /log
-  LOG_ROLE_ID: process.env.LOG_ROLE_ID,
+  LOG_ROLE_ID: process.env.LOG_ROLE_ID || null,
 
-  // Service account base64 (supports either env var name)
-  GOOGLE_B64:
-    process.env.GOOGLE_SERVICE_ACCOUNT ||
-    process.env.GOOGLE_CREDS_BASE64 ||
-    "",
-
-  // Optional: set to "1" once to wipe global commands (fixes “wrong /xp” showing up)
-  CLEAR_GLOBAL_COMMANDS: process.env.CLEAR_GLOBAL_COMMANDS === "1"
+  PORT: process.env.PORT || 3000,
 };
