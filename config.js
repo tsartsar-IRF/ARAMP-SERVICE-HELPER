@@ -5,5 +5,7 @@ module.exports = {
 
   SHEET_ID: process.env.SHEET_ID,
 
-  LOG_ROLE_ID: process.env.LOG_ROLE_ID, // role allowed to use /log
+  LOG_ROLE_ID: process.env.LOG_ROLE_ID || "",
+
+  GOOGLE_CREDS_ENV: process.env.GOOGLE_CREDS_ENV || "GOOGLE_CREDS_BASE64",
 };
