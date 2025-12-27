@@ -1,30 +1,31 @@
-const {
-  SlashCommandBuilder,
-  REST,
-  Routes,
-  EmbedBuilder,
-  PermissionFlagsBits,
-} = require("discord.js");
-
+const { SlashCommandBuilder, REST, Routes, EmbedBuilder } = require("discord.js");
 const { appendRow, getXpRowByNickname } = require("./sheets");
 const { blockBar } = require("./progress");
 const { CLIENT_ID, GUILD_ID, LOG_ROLE_ID } = require("./config");
 
-function displayName(member) {
-  return member?.nickname || member?.user?.username || "Unknown";
+function getDisplayName(member) {
+  return member.nickname || member.user.username;
 }
 
-function hasLogRole(member) {
-  if (!LOG_ROLE_ID) return true; // if not set, don't lock you out
-  return member.roles?.cache?.has(LOG_ROLE_ID);
+function hasRole(member, roleId) {
+  if (!roleId) return true;
+  return member.roles?.cache?.has(roleId);
 }
+
+const ALLOWED_TYPES = [
+  "Combat Training",
+  "Patrol",
+  "Recruitment Session",
+  "Special Event",
+  "Defense Training",
+];
 
 const commandsData = [
   new SlashCommandBuilder().setName("xp").setDescription("Check XP (from Google Sheets)"),
 
   new SlashCommandBuilder()
     .setName("log")
-    .setDescription("Log an event")
+    .setDescription("Log an event (restricted role)")
     .addStringOption((opt) =>
       opt
         .setName("type")
@@ -41,7 +42,7 @@ const commandsData = [
     .addStringOption((opt) =>
       opt.setName("attendees").setDescription("Comma separated attendees").setRequired(true)
     )
-    .addStringOption((opt) => opt.setName("proof").setDescription("Proof").setRequired(true)),
+    .addStringOption((opt) => opt.setName("proof").setDescription("Ending proof").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("logselfpatrol")
@@ -58,12 +59,12 @@ function registerCommands(client) {
     execute: async (interaction) => {
       await interaction.deferReply({ ephemeral: true });
 
-      const nick = displayName(interaction.member);
-      const row = await getXpRowByNickname(nick);
+      const nickname = getDisplayName(interaction.member);
+      const row = await getXpRowByNickname(nickname);
 
       if (!row) {
         return interaction.editReply(
-          `No XP row found for **${nick}** in the **XP** tab.\nMake sure XP!A matches your server nickname exactly.`
+          `No XP row found for **${nickname}** in **XP** tab.\nMake sure XP!A matches your server nickname exactly.`
         );
       }
 
@@ -72,15 +73,13 @@ function registerCommands(client) {
       const needed = nextXp ? Math.max(0, nextXp - xp) : null;
 
       const embed = new EmbedBuilder()
-        .setTitle(`${nick}`)
+        .setTitle(`${nickname}`)
         .addFields(
           { name: "Rank", value: rank || "Unknown", inline: true },
           { name: "XP", value: String(xp), inline: true },
           {
             name: "Progress",
-            value: nextXp
-              ? `${bar}\n${xp}/${nextXp} (${needed} left)`
-              : `${bar}\nNextXP not set in sheet`,
+            value: nextXp ? `${bar}\n${xp}/${nextXp} (${needed} left)` : `${bar}\nNextXP not set in sheet`,
           }
         )
         .setColor(0x2f3136);
@@ -95,17 +94,23 @@ function registerCommands(client) {
     execute: async (interaction) => {
       await interaction.deferReply({ ephemeral: true });
 
-      if (!hasLogRole(interaction.member)) {
+      if (!hasRole(interaction.member, LOG_ROLE_ID)) {
         return interaction.editReply("❌ You don’t have permission to use **/log**.");
       }
 
-      const nick = displayName(interaction.member);
+      const nickname = getDisplayName(interaction.member);
       const type = interaction.options.getString("type");
-      const attendees = interaction.options.getString("attendees");
+      const attendeesRaw = interaction.options.getString("attendees");
       const proof = interaction.options.getString("proof");
       const timestamp = new Date().toISOString();
 
-      await appendRow("LOG", [timestamp, nick, type, attendees, proof]);
+      // extra server-side validation (even though dropdown already restricts)
+      if (!ALLOWED_TYPES.includes(type)) {
+        return interaction.editReply("❌ Invalid event type.");
+      }
+
+      // Write ONLY logs (NO XP adding)
+      await appendRow("LOG", [timestamp, nickname, type, attendeesRaw, proof]);
 
       return interaction.editReply("✅ Logged to Google Sheets (LOG).");
     },
@@ -117,30 +122,30 @@ function registerCommands(client) {
     execute: async (interaction) => {
       await interaction.deferReply({ ephemeral: true });
 
-      const nick = displayName(interaction.member);
+      const nickname = getDisplayName(interaction.member);
       const start = interaction.options.getString("start");
       const end = interaction.options.getString("end");
       const proof = interaction.options.getString("proof");
       const timestamp = new Date().toISOString();
 
-      await appendRow("SELF_PATROL", [timestamp, nick, start, end, proof]);
+      // Write ONLY logs (NO XP adding)
+      await appendRow("SELF_PATROL", [timestamp, nickname, start, end, proof]);
 
       return interaction.editReply("✅ Logged to Google Sheets (SELF_PATROL).");
     },
   });
 
-  // Register slash commands (guild)
+  // Register slash commands
   const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
-
   (async () => {
     try {
       console.log("Registering slash commands...");
       await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
         body: commandsData.map((c) => c.toJSON()),
       });
-      console.log("✅ Slash commands registered");
+      console.log("✅ Commands registered.");
     } catch (err) {
-      console.error("❌ Slash command registration failed:", err);
+      console.error("❌ Command registration failed:", err);
     }
   })();
 }
