@@ -1,21 +1,28 @@
 const { google } = require("googleapis");
-const { SHEET_ID, GOOGLE_CREDS_ENV } = require("./config");
+const { SHEET_ID } = require("./config");
 
-function mustGetEnv(name) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing environment variable: ${name}`);
-  return v;
+function pickCredsEnv() {
+  const candidates = ["GOOGLE_CREDS_BASE64", "GOOGLE_SERVICE_ACCOUNT", "GOOGLE_CREDS"];
+  for (const name of candidates) {
+    if (process.env[name] && String(process.env[name]).trim().length > 0) return name;
+  }
+  return null;
 }
 
-const base64 = mustGetEnv(GOOGLE_CREDS_ENV);
+const CREDS_ENV = pickCredsEnv();
+if (!CREDS_ENV) {
+  throw new Error(
+    "Missing Google creds env var. Set one of: GOOGLE_CREDS_BASE64 / GOOGLE_SERVICE_ACCOUNT / GOOGLE_CREDS"
+  );
+}
+
+console.log(`✅ Using Google creds env var: ${CREDS_ENV}`);
 
 let creds;
 try {
-  creds = JSON.parse(Buffer.from(base64, "base64").toString("utf8"));
+  creds = JSON.parse(Buffer.from(process.env[CREDS_ENV], "base64").toString("utf8"));
 } catch (e) {
-  throw new Error(
-    `Failed to decode/parse ${GOOGLE_CREDS_ENV}. Make sure it's base64 of the FULL JSON file (one line).`
-  );
+  throw new Error(`Google creds env var (${CREDS_ENV}) is not valid base64 JSON.`);
 }
 
 const auth = new google.auth.GoogleAuth({
@@ -25,9 +32,8 @@ const auth = new google.auth.GoogleAuth({
 
 const sheets = google.sheets({ version: "v4", auth });
 
-// Append a row to a tab
 async function appendRow(tabName, valuesArray) {
-  await sheets.spreadsheets.values.append({
+  return sheets.spreadsheets.values.append({
     spreadsheetId: SHEET_ID,
     range: `${tabName}!A:Z`,
     valueInputOption: "USER_ENTERED",
@@ -35,8 +41,11 @@ async function appendRow(tabName, valuesArray) {
   });
 }
 
-// Reads XP data from XP tab
-// Expected: XP!A=Nickname, B=XP, C=NextXP, D=Rank
+// XP tab layout expected:
+// XP!A = Nickname
+// XP!B = XP
+// XP!C = NextXP (next rank requirement)
+// XP!D = Rank
 async function getXpRowByNickname(nickname) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
@@ -48,12 +57,11 @@ async function getXpRowByNickname(nickname) {
   const row = rows.find((r) => String(r[0] || "").trim() === String(nickname).trim());
   if (!row) return null;
 
-  return {
-    nickname: String(row[0] || "").trim(),
-    xp: Number(row[1] ?? 0),
-    nextXp: row[2] === "" || row[2] == null ? null : Number(row[2]),
-    rank: String(row[3] ?? "").trim(),
-  };
+  const xp = Number(row[1] ?? 0);
+  const nextXp = row[2] === "" || row[2] == null ? null : Number(row[2]);
+  const rank = String(row[3] ?? "").trim();
+
+  return { nickname: row[0], xp, nextXp, rank };
 }
 
 module.exports = { appendRow, getXpRowByNickname };
