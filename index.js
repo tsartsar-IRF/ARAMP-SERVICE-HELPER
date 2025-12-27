@@ -1,11 +1,11 @@
 const express = require("express");
 const { Client, Collection, GatewayIntentBits } = require("discord.js");
-const { DISCORD_TOKEN, PORT } = require("./config");
-const { registerCommands, registerSlashCommands } = require("./commands");
+const { TOKEN, PORT } = require("./config");
+const { registerCommands } = require("./commands");
 
 console.log("🚀 index.js loaded");
 
-// Keep-alive HTTP server (Render + UptimeRobot)
+// Keep-alive server (Render + UptimeRobot)
 const app = express();
 app.get("/", (req, res) => res.send("Bot is alive ✅"));
 app.listen(PORT, () => console.log(`Keep-alive server running on port ${PORT}`));
@@ -14,22 +14,16 @@ app.listen(PORT, () => console.log(`Keep-alive server running on port ${PORT}`))
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 client.commands = new Collection();
 
-// Register command handlers
+client.on("error", (e) => console.error("Discord client error:", e));
+client.on("shardError", (e) => console.error("Discord shard error:", e));
+client.on("warn", (m) => console.warn("Discord warn:", m));
+
 registerCommands(client);
 
-client.once("ready", async () => {
-  console.log(`✅ Discord READY event fired (${client.user.tag})`);
-  try {
-    console.log("Registering slash commands...");
-    await registerSlashCommands();
-    console.log("✅ Slash commands registered");
-  } catch (e) {
-    console.error("❌ Slash command registration failed:", e);
-  }
+client.once("ready", () => {
+  console.log("✅ Discord READY event fired");
+  console.log(`Logged in as ${client.user.tag}`);
 });
-
-client.on("error", (e) => console.error("Discord client error:", e));
-client.on("shardError", (e) => console.error("Shard error:", e));
 
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
@@ -40,25 +34,16 @@ client.on("interactionCreate", async (interaction) => {
   try {
     await command.execute(interaction);
   } catch (err) {
-    console.error("Command error:", err);
-
-    // try to respond safely even if already deferred/replied
+    console.error("Interaction handler error:", err);
     try {
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply("Command error.");
+        await interaction.editReply("❌ Command crashed.");
       } else {
-        await interaction.reply({ content: "Command error.", ephemeral: true });
+        await interaction.reply({ content: "❌ Command crashed.", ephemeral: true });
       }
     } catch {}
   }
 });
 
-(async () => {
-  try {
-    console.log("🔑 Attempting Discord login...");
-    await client.login(DISCORD_TOKEN);
-  } catch (e) {
-    console.error("❌ Discord login failed:", e);
-    process.exit(1);
-  }
-})();
+console.log("🔑 Attempting Discord login...");
+client.login(TOKEN);
