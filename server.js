@@ -1,12 +1,14 @@
 const express = require("express");
-const { PORT } = require("./config");
 
 function startServer() {
   const app = express();
+  const PORT = process.env.PORT || 10000;
 
-  app.get("/", (req, res) => res.send("Bot is alive ✅"));
+  app.get("/", (req, res) => res.status(200).send("Bot is alive ✅"));
 
-  app.listen(PORT, () => console.log(`Keep-alive server running on port ${PORT}`));
+  app.listen(PORT, () => {
+    console.log(`Keep-alive server running on port ${PORT}`);
+  });
 }
 
 module.exports = { startServer };
