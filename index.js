@@ -1,36 +1,42 @@
-// Minimal Discord login test bot (no commands, no sheets)
+console.log("🚀 index.js loaded");
 
-const { Client, GatewayIntentBits, Events } = require("discord.js");
-
-// OPTIONAL: keep-alive web server for Render Web Service + UptimeRobot
 const express = require("express");
+const { Client, Collection, GatewayIntentBits } = require("discord.js");
+const { TOKEN, PORT } = require("./config");
+const { registerCommands } = require("./commands");
+
+// Keep-alive server
 const app = express();
-const PORT = process.env.PORT || 10000;
-app.get("/", (req, res) => res.send("Discord test bot alive ✅"));
-app.listen(PORT, () => console.log(`Keep-alive server listening on ${PORT}`));
+app.get("/", (req, res) => res.send("Bot is alive ✅"));
+app.listen(PORT, () => console.log(`Keep-alive server running on port ${PORT}`));
 
-if (!process.env.DISCORD_TOKEN) {
-  console.error("❌ DISCORD_TOKEN is missing");
-  process.exit(1);
-}
+// Discord client
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+client.commands = new Collection();
 
-console.log(`✅ DISCORD_TOKEN present (length: ${process.env.DISCORD_TOKEN.length})`);
+// Debug events (these are CRUCIAL when login “hangs”)
+client.on("error", (e) => console.error("❌ Discord client error:", e));
+client.on("warn", (m) => console.warn("⚠️ Discord warn:", m));
+client.on("shardError", (e) => console.error("❌ Shard error:", e));
+client.on("shardDisconnect", (event, id) => console.warn(`⚠️ Shard ${id} disconnected:`, event?.reason));
+client.on("shardReconnecting", (id) => console.warn(`⚠️ Shard ${id} reconnecting...`));
+client.on("invalidated", () => console.error("❌ Client invalidated (Discord session)"));
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+client.once("ready", () => {
+  console.log("✅ Discord READY event fired");
+  console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
-client.once(Events.ClientReady, (c) => {
-  console.log(`✅ LOGGED IN as ${c.user.tag}`);
-  client.user.setPresence({
-    activities: [{ name: "Discord login test ✅" }],
-    status: "online",
-  });
-});
+registerCommands(client);
 
-client.on("error", (err) => console.error("❌ Client error:", err));
-client.on("warn", (info) => console.warn("⚠️ Client warn:", info));
-process.on("unhandledRejection", (err) => console.error("❌ UnhandledRejection:", err));
-
-console.log("🔑 Attempting Discord login...");
-client.login(process.env.DISCORD_TOKEN);
+(async () => {
+  try {
+    if (!TOKEN) throw new Error("DISCORD_TOKEN missing");
+    console.log(`✅ DISCORD_TOKEN present (length: ${TOKEN.length})`);
+    console.log("🔑 Attempting Discord login...");
+    await client.login(TOKEN);
+  } catch (err) {
+    console.error("❌ Discord login failed:", err);
+    process.exit(1);
+  }
+})();
