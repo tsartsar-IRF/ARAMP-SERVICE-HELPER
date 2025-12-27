@@ -1,67 +1,74 @@
 const { google } = require("googleapis");
-const { SHEET_ID, GOOGLE_CREDS_BASE64 } = require("./config");
+const { SHEET_ID, GOOGLE_CREDS_BASE64, GOOGLE_SERVICE_ACCOUNT } = require("./config");
 
-if (!SHEET_ID) throw new Error("Missing SHEET_ID env var");
-if (!GOOGLE_CREDS_BASE64) throw new Error("Missing GOOGLE_CREDS_BASE64 env var");
+function getCredsB64() {
+  // Prefer GOOGLE_CREDS_BASE64 if present, otherwise GOOGLE_SERVICE_ACCOUNT
+  return GOOGLE_CREDS_BASE64 || GOOGLE_SERVICE_ACCOUNT || null;
+}
 
-const creds = JSON.parse(Buffer.from(GOOGLE_CREDS_BASE64, "base64").toString("utf8"));
+const b64 = getCredsB64();
+if (!b64) {
+  throw new Error("Missing Google creds env var. Set GOOGLE_CREDS_BASE64 or GOOGLE_SERVICE_ACCOUNT.");
+}
+
+const creds = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
 
 const auth = new google.auth.GoogleAuth({
   credentials: creds,
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"]
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 
 const sheets = google.sheets({ version: "v4", auth });
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-async function withRetry(fn, tries = 3) {
-  let lastErr;
-  for (let i = 0; i < tries; i++) {
-    try {
-      return await fn();
-    } catch (e) {
-      lastErr = e;
-      // backoff: 400ms, 900ms, 1600ms
-      await sleep(400 + i * i * 500);
-    }
+// helper: timeout any Sheets call
+async function withTimeout(promise, ms, label = "Google Sheets") {
+  let t;
+  const timeout = new Promise((_, reject) => {
+    t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(t);
   }
-  throw lastErr;
 }
 
+// Append one row to a given tab
 async function appendRow(tabName, valuesArray) {
-  return withRetry(async () => {
-    return sheets.spreadsheets.values.append({
+  return withTimeout(
+    sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
       range: `${tabName}!A:Z`,
       valueInputOption: "USER_ENTERED",
-      requestBody: { values: [valuesArray] }
-    });
-  });
+      requestBody: { values: [valuesArray] },
+    }),
+    15000,
+    "appendRow"
+  );
 }
 
-// XP tab expected layout:
-// A Nickname | B XP | C NextXP | D Rank
+// Reads XP data from XP tab
+// Expected columns: A=Nickname, B=XP, C=NextXP, D=Rank
 async function getXpRowByNickname(nickname) {
-  return withRetry(async () => {
-    const res = await sheets.spreadsheets.values.get({
+  const res = await withTimeout(
+    sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
       range: "XP!A2:D",
-      valueRenderOption: "UNFORMATTED_VALUE"
-    });
+      valueRenderOption: "UNFORMATTED_VALUE",
+    }),
+    15000,
+    "getXpRowByNickname"
+  );
 
-    const rows = res.data.values || [];
-    const row = rows.find((r) => String(r[0] || "").trim() === String(nickname).trim());
-    if (!row) return null;
+  const rows = res.data.values || [];
+  const row = rows.find((r) => String(r[0] || "").trim() === String(nickname).trim());
+  if (!row) return null;
 
-    const xp = Number(row[1] ?? 0);
-    const nextXp = row[2] === "" || row[2] == null ? null : Number(row[2]);
-    const rank = String(row[3] ?? "").trim();
+  const xp = Number(row[1] ?? 0);
+  const nextXp = row[2] === "" || row[2] == null ? null : Number(row[2]);
+  const rank = String(row[3] ?? "").trim();
 
-    return { nickname: row[0], xp, nextXp, rank };
-  });
+  return { nickname: row[0], xp, nextXp, rank };
 }
 
 module.exports = { appendRow, getXpRowByNickname };
